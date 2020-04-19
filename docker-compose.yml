@@ -1,0 +1,215 @@
+version: '3.4'
+services:
+  # https://github.com/pyouroboros/ouroboros
+  ouroboros:
+    container_name: ouroboros
+    hostname: ouroboros
+    image: pyouroboros/ouroboros
+    environment:
+      - CLEANUP=true
+      - INTERVAL=300
+      - LOG_LEVEL=info
+      - SELF_UPDATE=true
+      - TZ=${TZ}
+      # - IGNORE=mongo influxdb postgres mariadb
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # https://github.com/dperson/openvpn-client
+  vpn:
+    container_name: vpn
+    image: dperson/openvpn-client:latest
+    cap_add:
+      - net_admin # required to modify network interfaces
+    restart: unless-stopped
+    volumes:
+      - /dev/net:/dev/net:z # tun device
+      - ${ROOT}/docker/config/vpn:/vpn # OpenVPN configuration
+    security_opt:
+      - label:disable
+    ports:
+      - 8112:8112 # port for deluge web UI to be reachable from local network
+    command: '-f "" -r 192.168.1.0/24' # enable firewall and route local network traffic
+
+  # https://github.com/linuxserver/docker-deluge
+  deluge:
+    container_name: deluge
+    depends_on:
+      - vpn
+    image: linuxserver/deluge:latest
+    restart: unless-stopped
+    network_mode: service:vpn # run on the vpn network
+    environment:
+      - PUID=${PUID} # default user id, defined in .env 
+      - PGID=${PGID} # default group id, defined in .env
+      - TZ=${TZ} # timezone, defined in .env
+    volumes:
+      - ${ROOT}/docker/config/deluge:/config # config files
+      - ${ROOT}/downloads:/downloads # downloads folder
+
+  # https://github.com/linuxserver/docker-organizr
+  organizr:
+    container_name: organizr
+    restart: always
+    image: linuxserver/organizr
+    volumes:
+      - ${ROOT}/docker/config/organizr:/config
+      - ${ROOT}/docker/shared:/shared
+    ports:
+      - "80:80"
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+
+  # https://github.com/linuxserver/docker-headphones
+  headphones:
+    image: linuxserver/headphones
+    container_name: headphones
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${ROOT}/docker/config/headphones:/config
+      - ${ROOT}/downloads:/downloads
+      - ${ROOT}/music:/music
+    ports:
+      - 8181:8181
+    restart: unless-stopped
+
+  # https://www.portainer.io
+  portainer:
+    image: portainer/portainer
+    container_name: portainer
+    restart: always
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ROOT}/docker/config/portainer/data:/data
+      - ${ROOT}/docker/shared:/shared
+    environment:
+      - TZ=${TZ}
+  
+  # https://github.com/linuxserver/docker-jackett
+  jackett:
+    container_name: jackett
+    image: linuxserver/jackett:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=${PUID} # default user id, defined in .env
+      - PGID=${PGID} # default group id, defined in .env
+      - TZ=${TZ} # timezone, defined in .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${ROOT}/downloads/torrent-blackhole:/downloads # place where to put .torrent files for manual download
+      - ${ROOT}/docker/config/jackett:/config # config files
+
+  # https://github.com/linuxserver/docker-sonarr
+  sonarr:
+    container_name: sonarr
+    image: linuxserver/sonarr:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=${PUID} # default user id, defined in .env
+      - PGID=${PGID} # default group id, defined in .env
+      - TZ=${TZ} # timezone, defined in .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${ROOT}/docker/config/sonarr:/config # config files
+      - ${ROOT}/complete/tv:/tv # tv shows folder
+      - ${ROOT}/downloads:/downloads # download folder
+
+  # https://github.com/linuxserver/docker-radarr
+  radarr:
+    container_name: radarr
+    image: linuxserver/radarr:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=${PUID} # default user id, defined in .env
+      - PGID=${PGID} # default group id, defined in .env
+      - TZ=${TZ} # timezone, defined in .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${ROOT}/docker/config/radarr:/config # config files
+      - ${ROOT}/complete/movies:/movies # movies folder
+      - ${ROOT}/downloads:/downloads # download folder
+
+  # RIP Plex, failed too many times to transcode.
+  # plex-server:
+  #   container_name: plex-server
+  #   image: plexinc/pms-docker:latest
+  #   restart: unless-stopped
+  #   environment:
+  #     - TZ=${TZ} # timezone, defined in .env
+  #     - PLEX_UID=${PUID}
+  #     - PLEX_GID=${PGID}
+  #     - PLEX_CLAIM=claim-iWAhvZ5W2WDkBzwRxkyz
+  #   network_mode: host
+  #   volumes:
+  #     - ${ROOT}/docker/config/plex/db:/config # plex database
+  #     - ${ROOT}/docker/config/plex/transcode:/transcode # temp transcoded files
+  #     - ${ROOT}/complete:/data # media library
+  #   devices:
+  #     - /dev/dri:/dev/dri
+
+  # https://github.com/linuxserver/docker-jellyfin
+  jellyfin:
+    container_name: jellyfin
+    image: jellyfin/jellyfin
+    user: ${PUID}:${PGID}
+    network_mode: host
+    restart: unless-stopped
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card0:/dev/dri/card0
+    volumes:
+      - ${ROOT}/docker/config/jellyfin/config:/config
+      - ${ROOT}/docker/config/jellyfin/cache:/cache
+      - ${ROOT}/complete:/media
+      - ${ROOT}/music:/music
+
+  # https://github.com/linuxserver/docker-lazylibrarian
+  lazylibrarian:
+    image: linuxserver/lazylibrarian
+    container_name: lazylibrarian
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - DOCKER_MODS=linuxserver/calibre-web:calibre #optional
+    volumes:
+      - ${ROOT}/docker/config/lazylibrarian:/config
+      - ${ROOT}/downloads:/downloads
+      - ${ROOT}/books:/books
+      - ${ROOT}/music/_audio_books:/_audio_books
+      - ${ROOT}/calibre:/calibre
+    ports:
+      - 5299:5299
+    restart: unless-stopped
+
+  # https://github.com/itzg/docker-minecraft-server
+  # minecraft:
+  #   container_name: minecraft
+  #   ports:
+  #     - 25565:25565
+  #     - 25575:25575
+  #   volumes:
+  #     - ${ROOT}/docker/config/minecraft:/data
+  #   environment:
+  #     TYPE: SPIGOT
+  #     CONSOLE: "FALSE"
+  #     EULA: "TRUE"
+  #     DIFFICULTY: peaceful
+  #     ENABLE_RCON: "TRUE"
+  #     RCON_PASSWORD: "minecraft"
+  #     RCON_PORT: 25575 # Default 25575
+  #   image: itzg/minecraft-server
+  #   restart: always
