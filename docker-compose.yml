@@ -1,20 +1,13 @@
 version: '3.4'
 services:
-  # https://github.com/pyouroboros/ouroboros
-  ouroboros:
-    container_name: ouroboros
-    hostname: ouroboros
-    image: pyouroboros/ouroboros
-    environment:
-      - CLEANUP=true
-      - INTERVAL=300
-      - LOG_LEVEL=info
-      - SELF_UPDATE=true
-      - TZ=${TZ}
-      # - IGNORE=mongo influxdb postgres mariadb
-    restart: unless-stopped
+  # https://github.com/containrrr/watchtower
+  watchtower:
+    container_name: watchtower
+    image: containrrr/watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json
+    command: --schedule "0 3 * * *" --cleanup # 3am daily
 
   # https://github.com/dperson/openvpn-client
   vpn:
@@ -44,6 +37,7 @@ services:
       - PUID=${PUID} # default user id, defined in .env 
       - PGID=${PGID} # default group id, defined in .env
       - TZ=${TZ} # timezone, defined in .env
+      - DELUGE_LOGLEVEL=error #optional default error
     volumes:
       - ${ROOT}/docker/config/deluge:/config # config files
       - ${ROOT}/downloads:/downloads # downloads folder
@@ -53,6 +47,7 @@ services:
     container_name: organizr
     restart: always
     image: linuxserver/organizr
+    network_mode: bridge
     volumes:
       - ${ROOT}/docker/config/organizr:/config
       - ${ROOT}/docker/shared:/shared
@@ -67,6 +62,7 @@ services:
   headphones:
     image: linuxserver/headphones
     container_name: headphones
+    network_mode: host
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -83,6 +79,7 @@ services:
   portainer:
     image: portainer/portainer
     container_name: portainer
+    network_mode: bridge
     restart: always
     command: -H unix:///var/run/docker.sock
     ports:
@@ -161,19 +158,24 @@ services:
 
   # https://github.com/linuxserver/docker-jellyfin
   jellyfin:
+    image: linuxserver/jellyfin
     container_name: jellyfin
-    image: jellyfin/jellyfin
-    user: ${PUID}:${PGID}
-    network_mode: host
-    restart: unless-stopped
-    devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128
-      - /dev/dri/card0:/dev/dri/card0
+    network_mode: bridge
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
     volumes:
       - ${ROOT}/docker/config/jellyfin/config:/config
       - ${ROOT}/docker/config/jellyfin/cache:/cache
       - ${ROOT}/complete:/media
       - ${ROOT}/music:/music
+    ports:
+      - 8096:8096
+      - 8920:8920 #optional
+    devices:
+      - /dev/dri:/dev/dri #optional
+    restart: unless-stopped
 
   # https://github.com/linuxserver/docker-lazylibrarian
   lazylibrarian:
